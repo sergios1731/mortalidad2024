@@ -1,0 +1,201 @@
+---
+title: "Análisis exploratorio de las EDR 2024"
+author: "Sergio Sánchez"
+date: "2025-12-15"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Lectura y limpieza de datos
+```{r}
+# leer archivos necesarios para el análisis
+setwd("~/DataCivica")
+library(foreign)
+library(dplyr)
+#Estadísticas de Defunciones Registradas
+EDR <- read.dbf("DEFUN24.dbf", as.is = TRUE)
+#Datos con los nombres de la ocupaciones de la persona fallecida
+ocup <- read.dbf("OCUPACIONES.dbf", as.is = TRUE)
+#datos con nombre de localidad, municipio y estado 
+lug <- read.csv("AGEEML.csv", fileEncoding = "latin1",
+stringsAsFactors = FALSE) %>% select(CVE_ENT, NOM_ABR, CVE_MUN, NOM_MUN)
+
+
+```
+
+Seleccionamos las variables que nos interesan después de haber leído la documentación de los datos para quitarle peso al df y hacerlo más manejable. 
+También vamos a agregarle el nombre de municipio y estado.
+```{r}
+#primero vamos a filtrar por muertes violentas y por defunción por homicidio, que son los datos que nos interesan para el análisis. Así también hacemos más pequeño y manejable el dataframe EDR
+table(EDR$NATVIOLE, useNA = "ifany")
+EDR <- EDR %>% filter(NATVIOLE == "1"& TIPO_DEFUN==2)
+
+vars <- c(
+  14,18,19,25,26,29,30,31,32,33,34,35,41,45,46,48,49,50,51,52,
+  53,54,55,56,7,58,59,60,61,62,65,66,67,68,69,73,74)
+
+EDR <- EDR[, -vars]
+
+EDR$CVE_GEO <- paste0(
+  sprintf("%02d", as.integer(EDR$ENT_OCURR)),
+  sprintf("%03d", as.integer(EDR$MUN_OCURR)))
+lug$CVE_GEO <- paste0(
+  sprintf("%02d", as.integer(lug$CVE_ENT)),
+  sprintf("%03d", as.integer(lug$CVE_MUN)))
+
+EDR$NOM_MUN <- lug$NOM_MUN[
+  match(EDR$CVE_GEO, lug$CVE_GEO)]
+
+EDR$NOM_ABR <- lug$NOM_ABR[
+  match(EDR$CVE_GEO, lug$CVE_GEO)]
+
+EDR$NOM_OCUP <- ocup$DESCRIP[
+  match(EDR$OCUPACION, ocup$CVE)]
+
+``` 
+
+## Análisis exploratorio de datos
+
+Como para nuestro análisis nos interesa saber las muertes por violencia, vamos a filtrar por muertes violentas y a partir de eso empezar a explorar los fallecimientos por tiempo, espacio, y otras variables.
+Vamos a analizar la distribución de las defunciones por meses y estados. Después, vamos a explorar algunas hipótesis provisionales que tenemos de haber ojeado la lista de variables. Con estas hipótesis queremos encontrar si hay alguna relación entre muertes por violencia y la ocupación de la persona asesinada. Hay también variables como escolaridad, tamaño de la localidad donde ocurrió el suceso y si la localidad es urbana o rural. Las relaciones entre estas variables son solo hipótesis que nos sirven para guiarnos en este primer clavado a la base de datos sobre de defunciones.
+
+```{r}
+## Defunciones en meses y estados
+#10 estados con mayor número de defunciones
+library(dplyr)
+
+ent10 <- EDR %>%
+     count(NOM_ABR, name = "DEFUNCIONES") %>%
+     arrange(desc(DEFUNCIONES)) %>%
+  select(NOM_ABR,DEFUNCIONES) %>% 
+     slice_head(n = 10)
+
+mun30<- EDR %>%
+  count(NOM_MUN, name = "DEFUNCIONES") %>%
+  arrange(desc(DEFUNCIONES)) %>%
+  slice_head(n = 30)
+
+MUERTES_MES <- EDR %>%
+  count(MES_OCURR, name = "DEFUNCIONES") %>%
+  arrange(MES_OCURR)
+
+barplot(
+  height = MUERTES_MES$DEFUNCIONES,
+  names.arg = MUERTES_MES$MES_OCURR,
+  main = "Defunciones por mes en 2024",
+  xlab = "Mes",
+  ylab = "Número de defunciones",
+  col = "steelblue")
+
+xsexo <- EDR %>%
+  count(SEXO, name = "DEFUNCIONES")
+
+xsexo
+```
+
+Ya tenemos un primer vistazo a los datos y a algunos datos generales. Pero estos datos por sí solos no nos dicen mucho. Hay 3 cosas que nos interesan saber sobre muertes violentas, lo cual nos pueda descubrir información relevante sobre los problemas de inseguridad y desapariciones que se viven en el país:
+-¿Cuáles son las ocupaciones de las personas asesinadas?
+-¿Cuál es su nivel de escolaridad?
+-¿En qué areas suceden más homicidios?
+
+
+
+```{r message=, warning=FALSE}
+#Sobre las ocupaciones de las personas asesinadas
+
+ocup30 <- EDR %>% select(NOM_OCUP,OCUPACION) %>% 
+  count(OCUPACION, NOM_OCUP, name = "DEFUNCIONES") %>%
+  arrange(desc(DEFUNCIONES)) %>%
+  slice_head(n = 30)
+
+ocup30
+# ahora por porcentaje
+ocup_porc <- ocup30 %>%
+  mutate(
+    PORCENTAJE = DEFUNCIONES / sum(DEFUNCIONES) * 100
+  )
+
+ocup_porc
+
+
+barplot(
+  height = ocup_porc$DEFUNCIONES,
+  names.arg = ocup_porc$OCUPACION,
+  las = 2,
+  main = "Ocupaciones con mayor número de defunciones por homicidio",
+  xlab = "Código de ocupación",
+  ylab = "Número de defunciones",
+  cex.names = 0.7,)
+```
+
+
+### Datos por nivel de escolaridad
+```{r}
+
+ESCOLARIDAD_TAB <- EDR %>%
+  count(ESCOLARIDA, name = "DEFUNCIONES") %>%
+  mutate(
+    ESCOLARIDAD_LAB = factor(
+      ESCOLARIDA,
+      levels = c(1,2,3,4,5,6,7,8,9,10,88,99),
+      labels = c(
+        "Sin escolaridad",
+        "Preescolar",
+        "Primaria incompleta",
+        "Primaria completa",
+        "Secundaria incompleta",
+        "Secundaria completa",
+        "Preparatoria incompleto",
+        "Preparatoria completo",
+        "Profesional",
+        "Posgrado",
+        "No aplica",
+        "No especificado"
+      )
+    ),
+    PORCENTAJE = round(DEFUNCIONES / sum(DEFUNCIONES) * 100, 2)
+  ) %>%
+  arrange(desc(DEFUNCIONES))
+
+ESCOLARIDAD_TAB
+
+par(mar = c(9, 5, 4, 2))
+bp <- barplot(
+  height = ESCOLARIDAD_TAB$PORCENTAJE,
+  names.arg = ESCOLARIDAD_TAB$ESCOLARIDAD_LAB,
+  las = 2,
+  main = "Defunciones por homicidio por nivel de escolaridad (%)",
+  ylab = "Porcentaje (%)",
+  cex.names = 0.75)
+
+
+```
+
+### Área rural o urbana
+```{r}
+AREA_UR_TAB <- EDR %>%
+  count(AREA_UR, name = "DEFUNCIONES") %>%
+  mutate(
+    PORCENTAJE = DEFUNCIONES / sum(DEFUNCIONES) * 100,
+    ÁREA_LAB = factor(
+      AREA_UR,
+    levels = c(1,2,9),
+    labels = c("Urbana", "Rural", "No especificada")
+  )
+  )%>%
+  arrange(desc(DEFUNCIONES))
+
+AREA_UR_TAB
+
+bp <- barplot(
+  height = AREA_UR_TAB$PORCENTAJE,
+  names.arg = AREA_UR_TAB$ÁREA_LAB,
+  main = "Defunciones por homicidio por área urbana–rural (%)",
+  xlab = "Área",
+  ylab = "Porcentaje (%)"
+)
+```
