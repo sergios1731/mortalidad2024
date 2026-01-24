@@ -13,10 +13,10 @@ knitr::opts_chunk$set(echo = TRUE)
 ### Lectura y limpieza de datos
 ```{r}
 # leer archivos necesarios para el análisis
-setwd("~/DataCivica")
+
 library(foreign)
 library(dplyr)
-#Estadísticas de Defunciones Registradas
+#Estadísticas de Defunciones Registradas (datos provenientes del INEGI)
 EDR <- read.dbf("DEFUN24.dbf", as.is = TRUE)
 #Datos con los nombres de la ocupaciones de la persona fallecida
 ocup <- read.dbf("OCUPACIONES.dbf", as.is = TRUE)
@@ -199,3 +199,4 @@ bp <- barplot(
   ylab = "Porcentaje (%)"
 )
 ```
+
